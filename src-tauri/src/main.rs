@@ -16,6 +16,7 @@ use commands::agents::{
     list_agent_runs, list_agent_runs_with_metrics, list_agents, list_claude_installations,
     list_running_sessions, load_agent_session_history, set_claude_binary_path, stream_session_output, update_agent, AgentDb,
 };
+use commands::lm_studio::{fetch_lm_studio_models, test_lm_studio_connection};
 use commands::claude::{
     cancel_claude_execution, check_auto_checkpoint, check_claude_version, cleanup_old_checkpoints,
     clear_checkpoint_manager, continue_claude_code, create_checkpoint, create_project, execute_claude_code,
@@ -284,6 +285,10 @@ fn main() {
             // Proxy Settings
             get_proxy_settings,
             save_proxy_settings,
+            
+            // LM Studio
+            fetch_lm_studio_models,
+            test_lm_studio_connection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

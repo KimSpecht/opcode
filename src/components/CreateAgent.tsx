@@ -1,6 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, Save, Loader2, ChevronDown, Zap, AlertCircle } from "lucide-react";
+import { ArrowLeft, Save, Loader2, ChevronDown, Zap, AlertCircle, Cpu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -49,12 +49,55 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
   const [systemPrompt, setSystemPrompt] = useState(agent?.system_prompt || "");
   const [defaultTask, setDefaultTask] = useState(agent?.default_task || "");
   const [model, setModel] = useState(agent?.model || "sonnet");
+  
+  // LM Studio integration state
+  const [lmStudioEnabled, setLmStudioEnabled] = useState(false);
+  const [lmStudioModels, setLmStudioModels] = useState<string[]>([]);
+  const [loadingLmStudio, setLoadingLmStudio] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [showIconPicker, setShowIconPicker] = useState(false);
 
   const isEditMode = !!agent;
+
+  // Load LM Studio models and settings
+  useEffect(() => {
+    const loadLmStudioData = async () => {
+      try {
+        setLoadingLmStudio(true);
+        console.log('CreateAgent: Loading LM Studio data...');
+        
+        // Check if LM Studio is enabled in settings (using the same API as Settings component)
+        const enabledSetting = await api.getSetting('lm_studio_enabled');
+        const urlSetting = await api.getSetting('lm_studio_url');
+        
+        const enabled = enabledSetting === 'true';
+        const baseUrl = urlSetting || 'http://localhost:1234';
+        
+        console.log('CreateAgent: LM Studio enabled:', enabled, 'baseUrl:', baseUrl);
+        setLmStudioEnabled(enabled);
+        
+        if (enabled) {
+          console.log('CreateAgent: Fetching LM Studio models...');
+          // Fetch LM Studio models
+          const models = await api.fetchLmStudioModels(baseUrl);
+          console.log('CreateAgent: LM Studio models fetched:', models);
+          setLmStudioModels(models);
+        } else {
+          console.log('CreateAgent: LM Studio not enabled, skipping model fetch');
+        }
+      } catch (error) {
+        console.error('CreateAgent: Failed to load LM Studio data:', error);
+        setLmStudioEnabled(false);
+        setLmStudioModels([]);
+      } finally {
+        setLoadingLmStudio(false);
+      }
+    };
+
+    loadLmStudioData();
+  }, []);
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -238,55 +281,107 @@ export const CreateAgent: React.FC<CreateAgentProps> = ({
               {/* Model Selection */}
               <div className="space-y-2 mt-4">
                 <Label className="text-caption text-muted-foreground">Model</Label>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <motion.button
-                    type="button"
-                    onClick={() => setModel("sonnet")}
-                    whileTap={{ scale: 0.97 }}
-                    transition={{ duration: 0.15 }}
-                    className={cn(
-                      "flex-1 px-4 py-3 rounded-md border transition-all",
-                      model === "sonnet" 
-                        ? "border-primary bg-primary/10 text-primary" 
-                        : "border-border hover:border-primary/50 hover:bg-accent"
-                    )}
-                  >
-                    <div className="flex items-center gap-3">
-                      <Zap className={cn(
-                        "h-4 w-4",
-                        model === "sonnet" ? "text-primary" : "text-muted-foreground"
-                      )} />
-                      <div className="text-left">
-                        <div className="text-body-small font-medium">Claude 4 Sonnet</div>
-                        <div className="text-caption text-muted-foreground">Faster, efficient for most tasks</div>
+                
+                {/* Claude Models */}
+                <div className="space-y-3">
+                  <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Claude Models</div>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <motion.button
+                      type="button"
+                      onClick={() => setModel("sonnet")}
+                      whileTap={{ scale: 0.97 }}
+                      transition={{ duration: 0.15 }}
+                      className={cn(
+                        "flex-1 px-4 py-3 rounded-md border transition-all",
+                        model === "sonnet" 
+                          ? "border-primary bg-primary/10 text-primary" 
+                          : "border-border hover:border-primary/50 hover:bg-accent"
+                      )}
+                    >
+                      <div className="flex items-center gap-3">
+                        <Zap className={cn(
+                          "h-4 w-4",
+                          model === "sonnet" ? "text-primary" : "text-muted-foreground"
+                        )} />
+                        <div className="text-left">
+                          <div className="text-body-small font-medium">Claude 4 Sonnet</div>
+                          <div className="text-caption text-muted-foreground">Faster, efficient for most tasks</div>
+                        </div>
                       </div>
-                    </div>
-                  </motion.button>
-                  
-                  <motion.button
-                    type="button"
-                    onClick={() => setModel("opus")}
-                    whileTap={{ scale: 0.97 }}
-                    transition={{ duration: 0.15 }}
-                    className={cn(
-                      "flex-1 px-4 py-3 rounded-md border transition-all",
-                      model === "opus" 
-                        ? "border-primary bg-primary/10 text-primary" 
-                        : "border-border hover:border-primary/50 hover:bg-accent"
-                    )}
-                  >
-                    <div className="flex items-center gap-3">
-                      <Zap className={cn(
-                        "h-4 w-4",
-                        model === "opus" ? "text-primary" : "text-muted-foreground"
-                      )} />
-                      <div className="text-left">
-                        <div className="text-body-small font-medium">Claude 4 Opus</div>
-                        <div className="text-caption text-muted-foreground">More capable, better for complex tasks</div>
+                    </motion.button>
+                    
+                    <motion.button
+                      type="button"
+                      onClick={() => setModel("opus")}
+                      whileTap={{ scale: 0.97 }}
+                      transition={{ duration: 0.15 }}
+                      className={cn(
+                        "flex-1 px-4 py-3 rounded-md border transition-all",
+                        model === "opus" 
+                          ? "border-primary bg-primary/10 text-primary" 
+                          : "border-border hover:border-primary/50 hover:bg-accent"
+                      )}
+                    >
+                      <div className="flex items-center gap-3">
+                        <Zap className={cn(
+                          "h-4 w-4",
+                          model === "opus" ? "text-primary" : "text-muted-foreground"
+                        )} />
+                        <div className="text-left">
+                          <div className="text-body-small font-medium">Claude 4 Opus</div>
+                          <div className="text-caption text-muted-foreground">More capable, better for complex tasks</div>
+                        </div>
                       </div>
-                    </div>
-                  </motion.button>
+                    </motion.button>
+                  </div>
                 </div>
+
+                {/* LM Studio Models */}
+                {lmStudioEnabled && (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">LM Studio Models</div>
+                      {loadingLmStudio && <Loader2 className="h-3 w-3 animate-spin" />}
+                    </div>
+                    
+                    {lmStudioModels.length > 0 ? (
+                      <div className="grid gap-2">
+                        {lmStudioModels.map((modelName) => (
+                          <motion.button
+                            key={modelName}
+                            type="button"
+                            onClick={() => setModel(modelName)}
+                            whileTap={{ scale: 0.97 }}
+                            transition={{ duration: 0.15 }}
+                            className={cn(
+                              "px-4 py-3 rounded-md border transition-all text-left",
+                              model === modelName 
+                                ? "border-primary bg-primary/10 text-primary" 
+                                : "border-border hover:border-primary/50 hover:bg-accent"
+                            )}
+                          >
+                            <div className="flex items-center gap-3">
+                              <Cpu className={cn(
+                                "h-4 w-4",
+                                model === modelName ? "text-primary" : "text-muted-foreground"
+                              )} />
+                              <div className="text-left">
+                                <div className="text-body-small font-medium">{modelName}</div>
+                                <div className="text-caption text-muted-foreground">Local LM Studio model</div>
+                              </div>
+                            </div>
+                          </motion.button>
+                        ))}
+                      </div>
+                    ) : !loadingLmStudio && (
+                      <div className="px-4 py-3 border border-dashed rounded-md text-center text-muted-foreground">
+                        <Cpu className="h-4 w-4 mx-auto mb-1" />
+                        <div className="text-caption">No LM Studio models found</div>
+                        <div className="text-xs">Make sure LM Studio is running with models loaded</div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </Card>
 

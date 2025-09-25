@@ -1791,6 +1791,34 @@ export const api = {
   },
 
   /**
+   * Fetches available models from LM Studio's /v1/models endpoint
+   * @param baseUrl - The LM Studio base URL (e.g., http://localhost:1234)
+   * @returns Promise resolving to an array of model names
+   */
+  async fetchLmStudioModels(baseUrl: string): Promise<string[]> {
+    try {
+      return await invoke<string[]>("fetch_lm_studio_models", { baseUrl });
+    } catch (error) {
+      console.error("Failed to fetch LM Studio models:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Tests connection to LM Studio
+   * @param baseUrl - The LM Studio base URL (e.g., http://localhost:1234)
+   * @returns Promise resolving to true if connection is successful
+   */
+  async testLmStudioConnection(baseUrl: string): Promise<boolean> {
+    try {
+      return await invoke<boolean>("test_lm_studio_connection", { baseUrl });
+    } catch (error) {
+      console.error("Failed to test LM Studio connection:", error);
+      return false;
+    }
+  },
+
+  /**
    * Get hooks configuration for a specific scope
    * @param scope - The configuration scope: 'user', 'project', or 'local'
    * @param projectPath - Project path (required for project and local scopes)

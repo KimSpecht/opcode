@@ -8,6 +8,8 @@ import {
   Loader2,
   Shield,
   Check,
+  Zap,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +32,7 @@ import { ProxySettings } from "./ProxySettings";
 import { useTheme, useTrackEvent } from "@/hooks";
 import { analytics } from "@/lib/analytics";
 import { TabPersistenceService } from "@/services/tabPersistence";
+import { debugLmStudio } from "@/lib/debug-lm-studio";
 
 interface SettingsProps {
   /**
@@ -97,11 +100,20 @@ export const Settings: React.FC<SettingsProps> = ({
   // Startup intro preference
   const [startupIntroEnabled, setStartupIntroEnabled] = useState(true);
   
+  // LM Studio state
+  const [lmStudioEnabled, setLmStudioEnabled] = useState(false);
+  const [lmStudioUrl, setLmStudioUrl] = useState('http://localhost:1234');
+  const [lmStudioModels, setLmStudioModels] = useState<string[]>([]);
+  const [lmStudioSelectedModel, setLmStudioSelectedModel] = useState<string>('');
+  const [lmStudioLoading, setLmStudioLoading] = useState(false);
+  const [lmStudioLastFetch, setLmStudioLastFetch] = useState<Date | null>(null);
+  
   // Load settings on mount
   useEffect(() => {
     loadSettings();
     loadClaudeBinaryPath();
     loadAnalyticsSettings();
+    loadLmStudioSettings();
     // Load tab persistence setting
     setTabPersistenceEnabled(TabPersistenceService.isEnabled());
     // Load startup intro setting (default to true if not set)
@@ -111,6 +123,17 @@ export const Settings: React.FC<SettingsProps> = ({
     })();
   }, []);
 
+  // Auto-refresh LM Studio models every 5 minutes when enabled
+  useEffect(() => {
+    if (!lmStudioEnabled) return;
+
+    const interval = setInterval(() => {
+      fetchLmStudioModels();
+    }, 5 * 60 * 1000); // 5 minutes
+
+    return () => clearInterval(interval);
+  }, [lmStudioEnabled, lmStudioUrl]);
+
   /**
    * Loads analytics settings
    */
@@ -118,6 +141,142 @@ export const Settings: React.FC<SettingsProps> = ({
     const settings = analytics.getSettings();
     if (settings) {
       setAnalyticsEnabled(settings.enabled);
+    }
+  };
+
+  /**
+   * Loads LM Studio settings
+   */
+  const loadLmStudioSettings = async () => {
+    try {
+      const enabled = await api.getSetting('lm_studio_enabled');
+      const url = await api.getSetting('lm_studio_url');
+      const selectedModel = await api.getSetting('lm_studio_selected_model');
+      
+      setLmStudioEnabled(enabled === 'true');
+      setLmStudioUrl(url || 'http://localhost:1234');
+      setLmStudioSelectedModel(selectedModel || '');
+      
+      // If enabled, try to fetch models
+      if (enabled === 'true') {
+        await fetchLmStudioModels();
+      }
+    } catch (err) {
+      console.error("Failed to load LM Studio settings:", err);
+    }
+  };
+
+  /**
+   * Fetches available models from LM Studio
+   */
+  const fetchLmStudioModels = async () => {
+    try {
+      setLmStudioLoading(true);
+      console.log(`Fetching models from LM Studio at: ${lmStudioUrl}`);
+      const models = await api.fetchLmStudioModels(lmStudioUrl);
+      console.log(`Successfully fetched ${models.length} models:`, models);
+      setLmStudioModels(models);
+      setLmStudioLastFetch(new Date());
+      
+      // If we have models but no selected model, select the first one
+      if (models.length > 0 && !lmStudioSelectedModel) {
+        const firstModel = models[0];
+        setLmStudioSelectedModel(firstModel);
+        await api.saveSetting('lm_studio_selected_model', firstModel);
+        console.log(`Auto-selected first model: ${firstModel}`);
+      }
+      
+      setToast({ message: `Successfully loaded ${models.length} models`, type: 'success' });
+    } catch (err) {
+      console.error("Failed to fetch LM Studio models:", err);
+      setLmStudioModels([]);
+      
+      // Show more detailed error message
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      setToast({ 
+        message: `Failed to fetch models from ${lmStudioUrl}: ${errorMessage}`, 
+        type: 'error' 
+      });
+    } finally {
+      setLmStudioLoading(false);
+    }
+  };
+
+  /**
+   * Tests connection to LM Studio
+   */
+  const testLmStudioConnection = async () => {
+    try {
+      setLmStudioLoading(true);
+      console.log(`Testing connection to LM Studio at: ${lmStudioUrl}`);
+      const connected = await api.testLmStudioConnection(lmStudioUrl);
+      console.log(`Connection test result: ${connected}`);
+      
+      if (connected) {
+        setToast({ message: 'Successfully connected to LM Studio!', type: 'success' });
+        await fetchLmStudioModels();
+      } else {
+        setToast({ 
+          message: `Failed to connect to LM Studio at ${lmStudioUrl}. Make sure it's running and the "Local server" is enabled.`, 
+          type: 'error' 
+        });
+      }
+    } catch (err) {
+      console.error("Failed to test LM Studio connection:", err);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      setToast({ message: `Connection test failed: ${errorMessage}`, type: 'error' });
+    } finally {
+      setLmStudioLoading(false);
+    }
+  };
+
+  /**
+   * Handles LM Studio enable/disable
+   */
+  const handleLmStudioToggle = async (enabled: boolean) => {
+    setLmStudioEnabled(enabled);
+    await api.saveSetting('lm_studio_enabled', enabled ? 'true' : 'false');
+    
+    if (enabled) {
+      await fetchLmStudioModels();
+    } else {
+      // Clear environment variables when disabled
+      updateSetting('env', {
+        ...settings?.env,
+        ANTHROPIC_API_BASE: undefined,
+        ANTHROPIC_MODEL: undefined,
+        OPENAI_API_BASE: undefined,
+      });
+    }
+  };
+
+  /**
+   * Handles LM Studio URL change
+   */
+  const handleLmStudioUrlChange = async (url: string) => {
+    setLmStudioUrl(url);
+    await api.saveSetting('lm_studio_url', url);
+    
+    if (lmStudioEnabled) {
+      await fetchLmStudioModels();
+    }
+  };
+
+  /**
+   * Handles LM Studio model selection
+   */
+  const handleLmStudioModelChange = async (model: string) => {
+    setLmStudioSelectedModel(model);
+    await api.saveSetting('lm_studio_selected_model', model);
+    
+    if (lmStudioEnabled && model) {
+      // Update environment variables to use LM Studio
+      updateSetting('env', {
+        ...settings?.env,
+        ANTHROPIC_API_BASE: `${lmStudioUrl}/v1`,
+        ANTHROPIC_MODEL: model,
+        OPENAI_API_BASE: `${lmStudioUrl}/v1`,
+      });
     }
   };
 
@@ -768,6 +927,174 @@ export const Settings: React.FC<SettingsProps> = ({
                       />
                     </div>
                   </div>
+                </div>
+              </Card>
+
+              {/* LM Studio Integration */}
+              <Card className="p-6 space-y-6">
+                <div>
+                  <h3 className="text-heading-4 mb-4">LM Studio Integration</h3>
+                  <p className="text-caption text-muted-foreground mb-6">
+                    Connect to your local LM Studio instance to use local models instead of Claude
+                  </p>
+                </div>
+
+                <div className="space-y-4">
+                  {/* Enable LM Studio Toggle */}
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-1 flex-1">
+                      <Label htmlFor="lm-studio-enabled">Enable LM Studio</Label>
+                      <p className="text-caption text-muted-foreground">
+                        Use local models from LM Studio instead of Claude API
+                      </p>
+                    </div>
+                    <Switch
+                      id="lm-studio-enabled"
+                      checked={lmStudioEnabled}
+                      onCheckedChange={handleLmStudioToggle}
+                    />
+                  </div>
+
+                  {/* LM Studio Configuration (shown when enabled) */}
+                  {lmStudioEnabled && (
+                    <div className="space-y-4 p-4 border rounded-lg bg-muted/20">
+                      {/* LM Studio URL */}
+                      <div className="space-y-2">
+                        <Label htmlFor="lm-studio-url">LM Studio URL</Label>
+                        <div className="flex gap-2">
+                          <Input
+                            id="lm-studio-url"
+                            type="url"
+                            placeholder="http://localhost:1234"
+                            value={lmStudioUrl}
+                            onChange={(e) => setLmStudioUrl(e.target.value)}
+                            onBlur={(e) => handleLmStudioUrlChange(e.target.value)}
+                            className="flex-1"
+                          />
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={testLmStudioConnection}
+                            disabled={lmStudioLoading}
+                          >
+                            {lmStudioLoading ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <Zap className="mr-2 h-4 w-4" />
+                            )}
+                            Test
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => debugLmStudio.checkStatus(lmStudioUrl)}
+                            disabled={lmStudioLoading}
+                            title="Run detailed diagnostics in browser console"
+                          >
+                            🔍 Debug
+                          </Button>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          The base URL where LM Studio is running (default: http://localhost:1234)
+                        </p>
+                      </div>
+
+                      {/* Model Selection */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label htmlFor="lm-studio-model">Available Models</Label>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={fetchLmStudioModels}
+                            disabled={lmStudioLoading}
+                          >
+                            {lmStudioLoading ? (
+                              <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                            ) : (
+                              <RefreshCw className="mr-2 h-3 w-3" />
+                            )}
+                            Refresh
+                          </Button>
+                        </div>
+
+                        {lmStudioModels.length > 0 ? (
+                          <select
+                            id="lm-studio-model"
+                            value={lmStudioSelectedModel}
+                            onChange={(e) => handleLmStudioModelChange(e.target.value)}
+                            className="w-full p-2 text-sm border rounded-md bg-background"
+                          >
+                            <option value="">Select a model...</option>
+                            {lmStudioModels.map((model) => (
+                              <option key={model} value={model}>
+                                {model}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <div className="p-3 text-sm text-muted-foreground bg-muted/50 rounded-md">
+                            {lmStudioLoading ? (
+                              <div className="flex items-center gap-2">
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                Loading models...
+                              </div>
+                            ) : (
+                              "No models found. Make sure LM Studio is running and has a model loaded."
+                            )}
+                          </div>
+                        )}
+
+                        {lmStudioLastFetch && (
+                          <p className="text-xs text-muted-foreground">
+                            Last updated: {lmStudioLastFetch.toLocaleTimeString()}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Status Information */}
+                      {lmStudioEnabled && lmStudioSelectedModel && (
+                        <div className="rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/20 p-3">
+                          <div className="flex gap-2">
+                            <Check className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
+                            <div className="space-y-1">
+                              <p className="text-xs font-medium text-green-800 dark:text-green-200">
+                                LM Studio Active
+                              </p>
+                              <p className="text-xs text-green-700 dark:text-green-300">
+                                Using model: <code className="font-mono bg-green-100 dark:bg-green-900/30 px-1 py-0.5 rounded">{lmStudioSelectedModel}</code>
+                              </p>
+                              <p className="text-xs text-green-600 dark:text-green-400">
+                                Claude API calls will be redirected to: <code className="font-mono">{lmStudioUrl}/v1</code>
+                              </p>
+                              <p className="text-xs text-green-600 dark:text-green-400">
+                                Environment variables set: <code className="font-mono">ANTHROPIC_API_BASE</code>, <code className="font-mono">ANTHROPIC_MODEL</code>
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Instructions */}
+                      <div className="rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/20 p-3">
+                        <div className="flex gap-2">
+                          <AlertCircle className="h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
+                          <div className="space-y-1">
+                            <p className="text-xs font-medium text-blue-800 dark:text-blue-200">
+                              How it works
+                            </p>
+                            <ul className="text-xs text-blue-700 dark:text-blue-300 space-y-0.5">
+                              <li>• Make sure LM Studio is running and has a model loaded</li>
+                              <li>• Enable the "Local server" in LM Studio (default port: 1234)</li>
+                              <li>• Select a model above and save settings</li>
+                              <li>• All Claude Code sessions will now use your local model</li>
+                              <li>• Models are automatically refreshed every 5 minutes</li>
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </Card>
             </TabsContent>
